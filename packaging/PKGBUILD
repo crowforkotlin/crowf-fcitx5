@@ -1,0 +1,26 @@
+# Maintainer: crowf <crowf@example.com>
+pkgname=fcitx5-theme-crowf
+pkgver=1.0.0
+pkgrel=1
+pkgdesc='Rounded fcitx5 theme with Material You dynamic colours'
+arch=('any')
+url='https://github.com/crowf/crowf-fcitx5'
+license=('MIT')
+depends=('fcitx5')
+makedepends=('librsvg' 'python' 'python-pillow')
+optdepends=('matugen: dynamic colours from a wallpaper')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    install -d "$pkgdir/usr/share/fcitx5/themes/crowf-dark" \
+               "$pkgdir/usr/share/fcitx5/themes/crowf-light"
+
+    for variant in dark light; do
+        install -m644 "$srcdir/crowf-fcitx5-$pkgver/themes/crowf-$variant/"*.{conf,png,svg} \
+            "$pkgdir/usr/share/fcitx5/themes/crowf-$variant/"
+    done
+
+    install -Dm644 "$srcdir/crowf-fcitx5-$pkgver/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
