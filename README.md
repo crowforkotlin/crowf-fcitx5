@@ -18,9 +18,16 @@ Two goals, in order:
 ```bash
 git clone https://github.com/crowf/crowf-fcitx5.git
 cd crowf-fcitx5
-./install.sh              # dark/light static themes
-./install.sh --matugen    # also register the matugen templates
+./install.sh                            # install the dark variant as "crowf"
+./install.sh --light                    # or the light variant
+./tools/register-matugen.sh             # hook into an existing matugen setup
 ```
+
+`install.sh --matugen` also exists, but it appends to `~/.config/matugen/config.toml`
+blindly. If you already have a matugen setup (dotfiles, DankMaterialShell,
+anything that regenerates on wallpaper change), prefer
+`tools/register-matugen.sh` — it wraps its block in markers so `--uninstall`
+can remove it cleanly, and it will not duplicate an existing registration.
 
 Then restart fcitx5 and select the theme:
 
@@ -62,6 +69,25 @@ Regenerate at any time:
 ```bash
 matugen image /path/to/wallpaper.jpg -m dark     # or -m light
 ```
+
+### standing alone vs. riding an existing setup
+
+Two entry points, pick one:
+
+| | when | what it does |
+| --- | --- | --- |
+| `tools/generate.sh IMAGE [--mode light]` | no matugen setup yet | builds a throwaway config, writes the theme once |
+| `tools/register-matugen.sh` | you already have matugen drivers (dotfiles, DMS, wallpaper daemon) | appends marked template entries so **your existing trigger** recolours fcitx5 too |
+
+The second one is what you want if switching wallpaper or theme already
+recolours the rest of your desktop. Verified with DankMaterialShell: after
+registering, `dms ipc call theme toggle` regenerates
+`~/.local/share/fcitx5/themes/crowf/` along with every other template.
+
+Note that fcitx5 reads the theme from `classicui.conf`, and DMS rewrites the
+`Theme=` key when it manages that file. If your theme keeps reverting, point
+`Theme=crowf` at it again after a DMS theme change, or disable DMS's own fcitx5
+template (`--skip-templates dmsfcitx5,dmsfcitx5panel,dmsfcitx5highlight`).
 
 ### what matugen integration needs from you
 
@@ -123,6 +149,8 @@ themes/crowf-light/
 matugen/templates/crowf/        matugen template (theme.conf + both SVGs)
 tools/render.py                 render + validate static themes
 tools/check-geometry.py         nine-slice validator (usable standalone)
+tools/generate.sh               standalone matugen run (no existing setup)
+tools/register-matugen.sh       hook into an existing matugen config
 packaging/PKGBUILD              AUR package
 ```
 

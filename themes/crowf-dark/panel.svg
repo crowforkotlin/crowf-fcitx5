@@ -14,6 +14,6 @@
      xmlns="http://www.w3.org/2000/svg">
   <path
      id="panel"
-     style="fill:#151515;stroke:#808080;stroke-width:0.5"
+     style="fill:#1a2121;stroke:#3f4949;stroke-width:0.5"
      d="M 16,4 H 32 A 12,12 0 0 1 44,16 V 32 A 12,12 0 0 1 32,44 H 16 A 12,12 0 0 1 4,32 V 16 A 12,12 0 0 1 16,4 Z" />
 </svg>
