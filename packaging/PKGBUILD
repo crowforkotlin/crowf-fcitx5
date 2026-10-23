@@ -11,7 +11,10 @@ makedepends=('python' 'python-pillow')
 provides=('fcitx5-mellow-themes')
 conflicts=('fcitx5-mellow-themes-git')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('46e2ef407bab116a98e82547855d584ab964cec58d777a8754f1fbff92717838')
+# Deliberately not a hash: a tag archive contains this very file, so it cannot
+# contain its own sha256. packaging/release.sh replaces this line with the real
+# checksum of the published archive before the AUR sees it.
+sha256sums=('SKIP')
 
 check() {
     python3 "$srcdir/crowf-fcitx5-$pkgver/tools/fix-contrast.py" \

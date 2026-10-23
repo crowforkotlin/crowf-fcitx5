@@ -1,39 +1,44 @@
 name: release
 
-# The tag vX.Y.Z is the single source of truth: packaging/PKGBUILD must already
-# carry that pkgver, because the AUR source URL is $url/archive/v$pkgver.tar.gz.
-# Pushing the tag builds the package, publishes it to the AUR, and only then
-# creates the GitHub release. A failing build blocks both publications.
+# Tag vX.Y.Z is the single source of truth. Pushing it:
+#   1. derives PKGBUILD/.SRCINFO for that tag and builds *those files*,
+#   2. publishes the same files to the AUR,
+#   3. creates the GitHub release with the built package.
+# Nothing is published if the build or any check fails.
+#
+# A tag archive cannot contain its own sha256, so packaging/release.sh computes
+# it from the published archive. packaging/PKGBUILD in git is a template; only
+# its pkgver must match the tag.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
     inputs:
       version:
-        description: Existing tag without the v prefix (e.g. 1.1.0)
+        description: Existing tag without the v prefix (e.g. 1.0.0)
         required: true
 
 concurrency:
-  group: release-${{ github.ref }}-${{ inputs.version }}
+  group: release-${{ inputs.version || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
   contents: write
 
 env:
-  PKGNAME: fcitx5-theme-mellow-fixed
-  # AUR package repos accept master only.
-  AUR_BRANCH: master
+  AUR_PKGNAME: fcitx5-theme-mellow-fixed
 
 jobs:
-  build:
-    name: build and check
+  prepare:
+    name: derive package files
     runs-on: ubuntu-latest
     container: archlinux:base-devel
+    outputs:
+      version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.version && format('v{0}', inputs.version) || github.ref }}
+          fetch-depth: 0 # the tagged PKGBUILD is read with git show
 
       - name: Resolve version
         id: v
@@ -42,32 +47,47 @@ jobs:
           [ -n "$version" ] || version="${GITHUB_REF_NAME#v}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      # The AUR copy is generated from this template, so a forgotten pkgver bump
-      # would publish an archive under a version the package does not declare.
-      - name: Verify PKGBUILD matches the tag
+      # Runs as root on purpose: --prepare only writes files and hashes the tag
+      # archive, and makepkg --printsrcinfo does not need an unprivileged user.
+      - name: Generate PKGBUILD and .SRCINFO
         run: |
-          pkgver=$(bash -c 'source packaging/PKGBUILD; echo "$pkgver"')
-          [ "$pkgver" = "${{ steps.v.outputs.version }}" ] ||
-            { echo "packaging/PKGBUILD is $pkgver, tag is ${{ steps.v.outputs.version }}" >&2; exit 1; }
+          pacman -Syu --noconfirm --needed git curl
+          packaging/release.sh "${{ steps.v.outputs.version }}" --prepare aurfiles
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aur-files
+          path: aurfiles/
+
+  verify:
+    name: build the prepared package
+    needs: prepare
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: aur-files
+          path: aurfiles
 
       # makepkg refuses to run as root, so the build runs as a normal user.
       - name: Build
         run: |
-          pacman -Syu --noconfirm --needed git python-pillow
+          pacman -Syu --noconfirm --needed python-pillow
           useradd -m builder
-          chown -R builder:builder .
+          chown -R builder:builder aurfiles
           # --nodeps skips fcitx5 itself, which packaging does not need. The tag
           # archive checksum and check() both still run for real.
-          su builder -c "cd '$PWD/packaging' && makepkg -f --nodeps --noconfirm"
+          su builder -c "cd aurfiles && makepkg -f --nodeps --noconfirm"
 
       - name: Collect artifact
         id: pkg
         run: |
           shopt -s nullglob
-          files=(packaging/*.pkg.tar.zst)
+          files=(aurfiles/*.pkg.tar.zst)
           [ ${#files[@]} -eq 1 ] || { echo "expected one package, got ${#files[@]}" >&2; exit 1; }
           case "$(basename "${files[0]}")" in
-          "$PKGNAME-${{ steps.v.outputs.version }}-"*) ;;
+          "$AUR_PKGNAME-${{ needs.prepare.outputs.version }}-"*) ;;
           *) echo "unexpected package name ${files[0]}" >&2; exit 1 ;;
           esac
           echo "path=${files[0]}" >> "$GITHUB_OUTPUT"
@@ -79,20 +99,16 @@ jobs:
 
   aur:
     name: publish to AUR
-    needs: build
+    needs: [prepare, verify]
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.version && format('v{0}', inputs.version) || github.ref }}
 
-      - name: Resolve version
-        id: v
-        run: |
-          version="${{ inputs.version }}"
-          [ -n "$version" ] || version="${GITHUB_REF_NAME#v}"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          name: aur-files
+          path: aurfiles
 
       - name: Install AUR key
         env:
@@ -100,11 +116,8 @@ jobs:
         run: |
           set -eu
           [ -n "$AUR_SSH_PRIVATE_KEY" ] || { echo "secret AUR_SSH_PRIVATE_KEY is unset" >&2; exit 1; }
-          pacman -Syu --noconfirm --needed git openssh curl
+          pacman -Syu --noconfirm --needed git openssh
           useradd -m builder
-          # release.sh reads packaging/PKGBUILD from the checkout and runs git,
-          # so the repository must be writable by the builder user.
-          chown -R builder:builder .
           install -d -m700 -o builder -g builder /home/builder/.ssh
           printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > /home/builder/.ssh/aur
           chmod 600 /home/builder/.ssh/aur
@@ -115,31 +128,30 @@ jobs:
             > /home/builder/.ssh/known_hosts
           chown builder:builder /home/builder/.ssh/known_hosts
           su builder -c "git config --global core.sshCommand 'ssh -i /home/builder/.ssh/aur -o IdentitiesOnly=yes'"
+          chown -R builder:builder aurfiles
 
+      # The verified files are published verbatim: no second checksum, no
+      # second PKGBUILD generation.
       - name: Push PKGBUILD and .SRCINFO
+        env:
+          AUR_GIT_NAME: crowf release bot
+          AUR_GIT_EMAIL: aur@aur.archlinux.org
         run: |
-          su builder -c "cd '$PWD' && packaging/release.sh '${{ steps.v.outputs.version }}'"
+          su builder -c "cd '$PWD' && packaging/release.sh '${{ needs.prepare.outputs.version }}' --publish-from aurfiles"
 
   github-release:
     name: create GitHub release
-    needs: [build, aur]
+    needs: [prepare, verify, aur]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: pkg
 
-      - name: Resolve version
-        id: v
-        run: |
-          version="${{ inputs.version }}"
-          [ -n "$version" ] || version="${GITHUB_REF_NAME#v}"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "v${{ steps.v.outputs.version }}" \
+          gh release create "v${{ needs.prepare.outputs.version }}" \
             --verify-tag --generate-notes ./*.pkg.tar.zst
