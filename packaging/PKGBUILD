@@ -11,7 +11,7 @@ makedepends=('python' 'python-pillow')
 provides=('fcitx5-mellow-themes')
 conflicts=('fcitx5-mellow-themes-git')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('SKIP') # updpkgsums once v$pkgver is tagged and pushed
+sha256sums=('46e2ef407bab116a98e82547855d584ab964cec58d777a8754f1fbff92717838')
 
 check() {
     python3 "$srcdir/crowf-fcitx5-$pkgver/tools/fix-contrast.py" \
