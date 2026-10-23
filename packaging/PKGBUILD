@@ -1,6 +1,6 @@
 # Maintainer: crowforkotlin <crowforkotlin@gmail.com>
 pkgname=fcitx5-theme-mellow-fixed
-pkgver=1.0.1
+pkgver=1.0.2
 pkgrel=1
 pkgdesc='Repaired Mellow fcitx5 themes with PNG textures and readable candidate highlights'
 arch=('any')
