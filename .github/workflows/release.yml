@@ -140,8 +140,8 @@ jobs:
       # second PKGBUILD generation.
       - name: Push PKGBUILD and .SRCINFO
         env:
-          AUR_GIT_NAME: crowf release bot
-          AUR_GIT_EMAIL: aur@aur.archlinux.org
+          AUR_GIT_NAME: crowforkotlin
+          AUR_GIT_EMAIL: crowforkotlin@gmail.com
         run: |
           su builder -c "cd '$PWD' && packaging/release.sh '${{ needs.prepare.outputs.version }}' --publish-from aurfiles"
 

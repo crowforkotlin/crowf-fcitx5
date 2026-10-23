@@ -1,0 +1,10 @@
+# Commit attribution.
+#
+# "crowf" is only the project/repository nickname. The contributor is the
+# GitHub/AUR account crowforkotlin, so commits authored under either the old
+# local identity or an AUR bot name are attributed to that one person.
+#
+# Format: Proper Name <proper@email> Commit Name <commit@email>
+crowforkotlin <crowforkotlin@gmail.com> crowf <crowf@users.noreply.github.com>
+crowforkotlin <crowforkotlin@gmail.com> crowf release bot <aur@aur.archlinux.org>
+crowforkotlin <crowforkotlin@gmail.com> release bot <aur@aur.archlinux.org>

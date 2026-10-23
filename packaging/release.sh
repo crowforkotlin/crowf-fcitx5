@@ -90,9 +90,10 @@ command -v makepkg >/dev/null || die "makepkg not found (pacman)"
 command -v curl >/dev/null || die "curl not found"
 command -v sha256sum >/dev/null || die "sha256sum not found"
 
-# The git identity for AUR commits. CI sets these; a local run can too.
-GIT_NAME="${AUR_GIT_NAME:-release bot}"
-GIT_EMAIL="${AUR_GIT_EMAIL:-aur@aur.archlinux.org}"
+# The git identity for AUR commits: the maintainer, not the repository nickname.
+# crowf is only the project/repository name; the person is crowforkotlin.
+GIT_NAME="${AUR_GIT_NAME:-crowforkotlin}"
+GIT_EMAIL="${AUR_GIT_EMAIL:-crowforkotlin@gmail.com}"
 git_commit() {
     git -C "$1" -c user.name="$GIT_NAME" -c user.email="$GIT_EMAIL" \
         commit --quiet -m "$2"
