@@ -32,6 +32,14 @@ the texture the theme actually ships, not against the number someone typed.
 
 ## install
 
+From the AUR (installs the ten themes under `/usr/share/fcitx5/themes`):
+
+```bash
+yay -S fcitx5-theme-mellow-fixed     # or any AUR helper / makepkg -si
+```
+
+From a clone:
+
 ```bash
 git clone https://github.com/crowforkotlin/crowf-fcitx5.git
 cd crowf-fcitx5
@@ -40,6 +48,10 @@ cd crowf-fcitx5
 ./install.sh --check          # audit what is installed, change nothing
 ./install.sh --uninstall      # remove the installed themes
 ```
+
+The AUR package `provides`/`conflicts` `fcitx5-mellow-themes`, so installing it
+replaces the unpatched `fcitx5-mellow-themes-git`. Both install the same paths
+and must not coexist.
 
 Then select one:
 
