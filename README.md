@@ -147,20 +147,34 @@ fcitx5-theme-mellow-fixed.git`) holding only `PKGBUILD` and `.SRCINFO`. The
 package sources a GitHub tag archive, so the tag is the single source of truth.
 
 ```bash
-# 1. bump the version in one place, commit
+# 1. bump the version, commit, tag, push
 sed -i 's/^pkgver=.*/pkgver=1.1.0/; s/^pkgrel=.*/pkgrel=1/' packaging/PKGBUILD
 git commit -am "release 1.1.0"
-# 2. tag and push: CI builds, publishes to the AUR, creates the release
-git tag -a v1.1.0 -m "v1.1.0" && git push origin main v1.1.0
+git tag -a v1.1.0 -m "v1.1.0"
+git push origin main v1.1.0
 ```
 
-`packaging/release.sh 1.1.0` does the same AUR half locally without CI.
+Pushing the tag runs `.github/workflows/release.yml`: it derives
+`PKGBUILD`/`.SRCINFO` for that tag, builds **those files**, pushes them to the
+AUR, and only then creates the GitHub release. Nothing is published if the
+build or any check fails.
+
+`packaging/release.sh 1.1.0` does the same AUR half locally, without CI.
 `--pkgrel 2` respins packaging without a new upstream tag; `--dry-run` shows the
-`PKGBUILD`/`.SRCINFO` diff and pushes nothing.
+diff and pushes nothing; `--prepare DIR` writes the files without touching git.
+
+The checksum is derived from the published tag archive, so the checked-in
+`PKGBUILD` carries `sha256sums=('SKIP')` as a template. A tag archive contains
+that file itself, so it can never contain its own hash; `release.sh` substitutes
+the real one. `pkgver` in the template must still equal the tag, and CI and the
+script both refuse a mismatch.
 
 CI needs one repository secret, `AUR_SSH_PRIVATE_KEY`: the private half of the
 SSH key registered on your AUR account. The AUR host key is pinned in the
 workflow, so no `known_hosts` scan happens at runtime.
+
+Republishing the same version is a no-op; forcing a rebuild means a `pkgrel`
+bump (`git tag -f` alone will not change the archive hash).
 
 ## design constraints (read before editing a texture)
 
