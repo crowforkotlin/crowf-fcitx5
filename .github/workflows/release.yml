@@ -47,12 +47,15 @@ jobs:
           [ -n "$version" ] || version="${GITHUB_REF_NAME#v}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      # Runs as root on purpose: --prepare only writes files and hashes the tag
-      # archive, and makepkg --printsrcinfo does not need an unprivileged user.
+      # makepkg refuses to run as root at all, including --printsrcinfo, so the
+      # whole derivation runs as a normal user.
       - name: Generate PKGBUILD and .SRCINFO
         run: |
           pacman -Syu --noconfirm --needed git curl
-          packaging/release.sh "${{ steps.v.outputs.version }}" --prepare aurfiles
+          useradd -m builder
+          chown -R builder:builder .
+          su builder -c "cd '$PWD' && packaging/release.sh '${{ steps.v.outputs.version }}' --prepare aurfiles"
+          ls -l aurfiles
 
       - uses: actions/upload-artifact@v4
         with:
