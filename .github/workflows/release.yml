@@ -61,6 +61,9 @@ jobs:
         with:
           name: aur-files
           path: aurfiles/
+          # .SRCINFO is hidden; the default excludes dotfiles, and without it
+          # the AUR job has only PKGBUILD.
+          include-hidden-files: true
 
   verify:
     name: build the prepared package
