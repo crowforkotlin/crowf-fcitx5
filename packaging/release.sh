@@ -156,13 +156,9 @@ if [[ -n $PUBLISH_FROM ]]; then
 fi
 
 # From here on the archive is required: --prepare derives its checksum, and the
-# direct mode derives both the checksum and the package files.
-has_tag() {
-    git -C "$ROOT_DIR" rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1 && return 0
-    git -C "$ROOT_DIR" ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1
-}
-has_tag || die "tag $TAG is not published; tag and push the release first"
-
+# direct mode derives both the checksum and the package files. Downloading the
+# tag archive is the real check that the tag is published; probing git refs is
+# not, because a CI checkout may be shallow or remote-less.
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -172,7 +168,7 @@ URL="https://github.com/$REPO_SLUG/archive/$TAG.tar.gz"
 # GitHub can 404 for a few seconds after a new tag, so retry before giving up.
 for attempt in 1 2 3 4 5; do
     curl -fsSL -o "$ARCHIVE" "$URL" && break
-    [[ $attempt == 5 ]] && die "cannot download $URL"
+    [[ $attempt == 5 ]] && die "cannot download $URL; is tag $TAG pushed?"
     note "attempt $attempt failed, retrying"
     sleep $((attempt * 3))
 done
@@ -187,8 +183,9 @@ IFS=/ read -r TOPLEVEL _ <"$WORK/list"
 
 # GitHub's tag archives carry the tagged PKGBUILD, whose pkgver must agree with
 # pkgver= in the generated file, otherwise a build from the tarball would
-# declare the wrong version.
-TAGGED_PKGVER="$(git -C "$ROOT_DIR" show "$TAG:packaging/PKGBUILD" 2>/dev/null |
+# declare the wrong version. Read it from the archive rather than via git: a CI
+# checkout may not have the tag as a ref at all.
+TAGGED_PKGVER="$(tar xzOf "$ARCHIVE" "crowf-fcitx5-$VERSION/packaging/PKGBUILD" 2>/dev/null |
     sed -n 's/^pkgver=//p' || true)"
 [[ $TAGGED_PKGVER == "$VERSION" ]] ||
     die "$TAG ships pkgver=${TAGGED_PKGVER:-<none>}, expected $VERSION"
