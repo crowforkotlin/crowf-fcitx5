@@ -1,43 +1,60 @@
 #!/usr/bin/env bash
-# crowf-fcitx5 installer.
+# crowf-fcitx5 — fcitx5 candidate panel themes that survive every toolkit.
 #
-# Copies the theme into the fcitx5 data directory and optionally wires up
-# matugen so the colours follow your wallpaper.
+# Installs the ten vendored Mellow colour schemes. Each one ships pre-rendered
+# PNG textures alongside the editable SVG, because the panels that render the
+# candidate list are not all the same program:
 #
-# fcitx5 selects exactly one theme by name, so this installs one variant under
-# the name "crowf". The other variant is still available as crowf-dark /
-# crowf-light if you install it separately.
+#   classicui            decodes SVG and PNG.
+#   client-side panels   (Qt/GTK apps ask for these over D-Bus) read the colour
+#                        keys in theme.conf and the PNG. WeChat draws its own
+#                        with statically linked Qt 5.15, which loads no
+#                        imageformat plugins at all — SVG is simply not an
+#                        option there, and without a PNG the panel degrades to
+#                        a flat square with hard corners.
+#
+# The upstream Mellow themes are SVG-only and declare a
+# HighlightBackgroundColor that does not match their own highlight texture, so
+# classicui and the client panels paint different fills for the selected
+# candidate. Both are corrected in themes/.
 #
 # Usage:
-#   ./install.sh                 install the dark variant as "crowf"
-#   ./install.sh --light         install the light variant instead
-#   ./install.sh --matugen       also register the matugen templates
-#   ./install.sh --prefix DIR    install under DIR instead of ~/.local/share
-#   ./install.sh --uninstall     remove everything this script installed
+#   ./install.sh                install every vendored theme
+#   ./install.sh --theme NAME   install only one (repeatable)
+#   ./install.sh --prefix DIR   install under DIR instead of ~/.local/share
+#   ./install.sh --check        audit installed themes, change nothing
+#   ./install.sh --uninstall    remove the themes this script installed
 set -euo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREFIX="${XDG_DATA_HOME:-$HOME/.local/share}"
-THEME_DIR="$PREFIX/fcitx5/themes/crowf"
-MATUGEN_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/matugen/config.toml"
-MATUGEN_TEMPLATES="${XDG_CONFIG_HOME:-$HOME/.config}/matugen/templates/crowf"
+THEMES_DIR="$PREFIX/fcitx5/themes"
+VENDOR_DIR="$SELF_DIR/themes"
 
-DO_MATUGEN=0
 DO_UNINSTALL=0
-VARIANT="dark"
+DO_CHECK=0
+SELECTED=()
+
+info() { printf '  %s\n' "$*"; }
+warn() { printf '  warning: %s\n' "$*" >&2; }
+
+usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while (($#)); do
     case "$1" in
-    --matugen) DO_MATUGEN=1 ;;
-    --light) VARIANT="light" ;;
-    --uninstall) DO_UNINSTALL=1 ;;
-    --prefix)
-        PREFIX="$2"
-        THEME_DIR="$PREFIX/fcitx5/themes/crowf"
+    --theme)
+        SELECTED+=("$2")
         shift
         ;;
+    --prefix)
+        PREFIX="$2"
+        THEMES_DIR="$PREFIX/fcitx5/themes"
+        shift
+        ;;
+    --uninstall) DO_UNINSTALL=1 ;;
+    --check) DO_CHECK=1 ;;
     -h | --help)
-        sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+        usage
         exit 0
         ;;
     *)
@@ -48,88 +65,78 @@ while (($#)); do
     shift
 done
 
-info() { printf '  %s\n' "$*"; }
-warn() { printf '  warning: %s\n' "$*" >&2; }
-
-need() {
-    command -v "$1" >/dev/null || {
-        echo "error: $1 is required" >&2
-        exit 1
-    }
+# Every theme this repository owns, in the order they will be installed.
+all_themes() {
+    local dir
+    for dir in "$VENDOR_DIR"/mellow-*/; do
+        [[ -d $dir ]] && basename "$dir"
+    done
 }
 
 if ((DO_UNINSTALL)); then
-    echo "Removing crowf-fcitx5"
-    rm -rf "$THEME_DIR"
-    rm -rf "$MATUGEN_TEMPLATES"
-    info "theme removed from $THEME_DIR"
-    info "matugen templates removed from $MATUGEN_TEMPLATES"
-    if [[ -f $MATUGEN_CONFIG ]]; then
-        warn "remove the [templates.crowf*] blocks from $MATUGEN_CONFIG by hand"
-    fi
-    warn "reset the fcitx5 theme in the config tool if it still points at 'crowf'"
+    echo "Removing crowf-fcitx5 themes"
+    for name in $(all_themes); do
+        rm -rf "${THEMES_DIR:?}/$name"
+        info "removed $name"
+    done
     exit 0
 fi
 
-need rsvg-convert
+if ((DO_CHECK)); then
+    python3 "$SELF_DIR/tools/fix-contrast.py" --check "$THEMES_DIR"/mellow-* 2>/dev/null ||
+        true
+    exit 0
+fi
 
-echo "Installing crowf-fcitx5"
-mkdir -p "$THEME_DIR"
+if ((${#SELECTED[@]})); then
+    themes=("${SELECTED[@]}")
+else
+    mapfile -t themes < <(all_themes)
+fi
 
-# The theme ships pre-rendered PNGs so it works without matugen, and so the
-# Qt-based candidate window (which cannot decode SVG) gets rounded corners too.
-src="$SELF_DIR/themes/crowf-$VARIANT"
-if [[ ! -d $src ]]; then
-    echo "error: missing $src" >&2
+if ((${#themes[@]} == 0)); then
+    echo "error: $VENDOR_DIR contains no themes" >&2
     exit 1
 fi
-cp "$src/theme.conf" "$THEME_DIR/theme.conf"
-info "installed theme.conf ($VARIANT variant)"
 
-for asset in panel highlight; do
-    cp "$src/$asset.svg" "$src/$asset.png" "$THEME_DIR/"
-    info "installed $asset.svg and $asset.png"
+echo "Installing crowf-fcitx5"
+mkdir -p "$THEMES_DIR"
+
+installed=0
+for name in "${themes[@]}"; do
+    src="$VENDOR_DIR/$name"
+    if [[ ! -d $src ]]; then
+        warn "skip $name (not in $VENDOR_DIR)"
+        continue
+    fi
+    dest="$THEMES_DIR/$name"
+    mkdir -p "$dest"
+    cp "$src/panel.svg" "$src/panel.png" \
+       "$src/highlight.svg" "$src/highlight.png" \
+       "$src/theme.conf" "$dest/"
+    info "installed $name"
+    installed=$((installed + 1))
 done
 
-info "installed to $THEME_DIR"
+echo
+info "$installed theme(s) installed to $THEMES_DIR"
 
-if ((DO_MATUGEN)); then
-    need matugen
-    mkdir -p "$MATUGEN_TEMPLATES"
-    cp "$SELF_DIR"/matugen/templates/crowf/* "$MATUGEN_TEMPLATES/"
-    info "copied matugen templates to $MATUGEN_TEMPLATES"
-
-    if [[ -f $MATUGEN_CONFIG ]] && grep -q 'templates\.crowf' "$MATUGEN_CONFIG"; then
-        info "matugen config already references crowf, leaving it alone"
-    else
-        cat >>"$MATUGEN_CONFIG" <<EOF
-
-[templates.crowf_theme]
-input_path = '$MATUGEN_TEMPLATES/theme.conf'
-output_path = '$THEME_DIR/theme.conf'
-
-[templates.crowf_panel]
-input_path = '$MATUGEN_TEMPLATES/panel.svg'
-output_path = '$THEME_DIR/panel.svg'
-post_hook = 'rsvg-convert -w 48 -h 48 $THEME_DIR/panel.svg -o $THEME_DIR/panel.png'
-
-[templates.crowf_highlight]
-input_path = '$MATUGEN_TEMPLATES/highlight.svg'
-output_path = '$THEME_DIR/highlight.svg'
-post_hook = 'rsvg-convert -w 48 -h 48 $THEME_DIR/highlight.svg -o $THEME_DIR/highlight.png'
-EOF
-        info "appended matugen template entries to $MATUGEN_CONFIG"
-    fi
+# Colour regressions are the whole reason this repository exists; make sure the
+# installed copies still pass rather than trusting that the vendored files do.
+if command -v python3 >/dev/null; then
+    echo
+    echo "Auditing installed themes"
+    python3 "$SELF_DIR/tools/fix-contrast.py" --check "$THEMES_DIR"/mellow-* || true
 fi
 
 cat <<'EOF'
 
 Next steps:
-  1. Restart fcitx5:            fcitx5 -r -d
-  2. Pick the theme:            fcitx5-configtool -> Addons -> Classic UI -> Theme = crowf
-     or edit ~/.config/fcitx5/conf/classicui.conf:  Theme=crowf
-  3. To recolour from a wallpaper:
-         matugen image /path/to/wallpaper.jpg -m dark
-     (DankMaterialShell and similar tools do this automatically once the
-      templates are registered)
+  Pick a theme in the fcitx5 configuration tool, or set it directly:
+
+    Theme=<name>          in ~/.config/fcitx5/conf/classicui.conf
+    DarkTheme=<name>      for the variant used when the desktop is dark
+
+  Variants that share a colour family differ only in panel brightness, so pair
+  a base name with its -dark sibling, e.g. Theme=mellow-graphite-dark.
 EOF
