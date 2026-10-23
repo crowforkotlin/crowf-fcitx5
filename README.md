@@ -173,8 +173,22 @@ CI needs one repository secret, `AUR_SSH_PRIVATE_KEY`: the private half of the
 SSH key registered on your AUR account. The AUR host key is pinned in the
 workflow, so no `known_hosts` scan happens at runtime.
 
+```bash
+# one-time: register the public key at https://aur.archlinux.org (My Account)
+gh secret set AUR_SSH_PRIVATE_KEY < ~/.ssh/aur
+```
+
+The key belongs to the AUR account, not to the repository: AUR authenticates
+you, then accepts a push only to packages you maintain. A local clone needs the
+same key once:
+
+```bash
+git -C ~/aur/fcitx5-theme-mellow-fixed config core.sshCommand "ssh -i $HOME/.ssh/aur"
+```
+
 Republishing the same version is a no-op; forcing a rebuild means a `pkgrel`
-bump (`git tag -f` alone will not change the archive hash).
+bump. Re-pointing a tag makes the archive hash change, so do not move a
+published tag — cut a new `pkgrel` instead.
 
 ## design constraints (read before editing a texture)
 
