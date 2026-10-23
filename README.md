@@ -135,8 +135,32 @@ install.sh                  install / audit / uninstall
 themes/mellow-*/            vendored, repaired themes (theme.conf + 2 svg + 2 png)
 tools/fix-contrast.py       contrast + asset audit and repair
 tools/check-geometry.py     nine-slice validator
-packaging/PKGBUILD          AUR package
+packaging/PKGBUILD          AUR package template
+packaging/release.sh        tag -> AUR publish
+.github/workflows/release.yml   CI: build, AUR push, GitHub release
 ```
+
+## releasing
+
+The AUR is a separate git repo (`ssh://aur@aur.archlinux.org/
+fcitx5-theme-mellow-fixed.git`) holding only `PKGBUILD` and `.SRCINFO`. The
+package sources a GitHub tag archive, so the tag is the single source of truth.
+
+```bash
+# 1. bump the version in one place, commit
+sed -i 's/^pkgver=.*/pkgver=1.1.0/; s/^pkgrel=.*/pkgrel=1/' packaging/PKGBUILD
+git commit -am "release 1.1.0"
+# 2. tag and push: CI builds, publishes to the AUR, creates the release
+git tag -a v1.1.0 -m "v1.1.0" && git push origin main v1.1.0
+```
+
+`packaging/release.sh 1.1.0` does the same AUR half locally without CI.
+`--pkgrel 2` respins packaging without a new upstream tag; `--dry-run` shows the
+`PKGBUILD`/`.SRCINFO` diff and pushes nothing.
+
+CI needs one repository secret, `AUR_SSH_PRIVATE_KEY`: the private half of the
+SSH key registered on your AUR account. The AUR host key is pinned in the
+workflow, so no `known_hosts` scan happens at runtime.
 
 ## design constraints (read before editing a texture)
 

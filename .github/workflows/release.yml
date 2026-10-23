@@ -1,0 +1,145 @@
+name: release
+
+# The tag vX.Y.Z is the single source of truth: packaging/PKGBUILD must already
+# carry that pkgver, because the AUR source URL is $url/archive/v$pkgver.tar.gz.
+# Pushing the tag builds the package, publishes it to the AUR, and only then
+# creates the GitHub release. A failing build blocks both publications.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing tag without the v prefix (e.g. 1.1.0)
+        required: true
+
+concurrency:
+  group: release-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  PKGNAME: fcitx5-theme-mellow-fixed
+  # AUR package repos accept master only.
+  AUR_BRANCH: master
+
+jobs:
+  build:
+    name: build and check
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version && format('v{0}', inputs.version) || github.ref }}
+
+      - name: Resolve version
+        id: v
+        run: |
+          version="${{ inputs.version }}"
+          [ -n "$version" ] || version="${GITHUB_REF_NAME#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # The AUR copy is generated from this template, so a forgotten pkgver bump
+      # would publish an archive under a version the package does not declare.
+      - name: Verify PKGBUILD matches the tag
+        run: |
+          pkgver=$(bash -c 'source packaging/PKGBUILD; echo "$pkgver"')
+          [ "$pkgver" = "${{ steps.v.outputs.version }}" ] ||
+            { echo "packaging/PKGBUILD is $pkgver, tag is ${{ steps.v.outputs.version }}" >&2; exit 1; }
+
+      # makepkg refuses to run as root, so the build runs as a normal user.
+      - name: Build
+        run: |
+          pacman -Syu --noconfirm --needed git python-pillow
+          useradd -m builder
+          chown -R builder:builder .
+          # --nodeps skips fcitx5 itself, which packaging does not need. The tag
+          # archive checksum and check() both still run for real.
+          su builder -c "cd '$PWD/packaging' && makepkg -f --nodeps --noconfirm"
+
+      - name: Collect artifact
+        id: pkg
+        run: |
+          shopt -s nullglob
+          files=(packaging/*.pkg.tar.zst)
+          [ ${#files[@]} -eq 1 ] || { echo "expected one package, got ${#files[@]}" >&2; exit 1; }
+          case "$(basename "${files[0]}")" in
+          "$PKGNAME-${{ steps.v.outputs.version }}-"*) ;;
+          *) echo "unexpected package name ${files[0]}" >&2; exit 1 ;;
+          esac
+          echo "path=${files[0]}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg
+          path: ${{ steps.pkg.outputs.path }}
+
+  aur:
+    name: publish to AUR
+    needs: build
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version && format('v{0}', inputs.version) || github.ref }}
+
+      - name: Resolve version
+        id: v
+        run: |
+          version="${{ inputs.version }}"
+          [ -n "$version" ] || version="${GITHUB_REF_NAME#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install AUR key
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          set -eu
+          [ -n "$AUR_SSH_PRIVATE_KEY" ] || { echo "secret AUR_SSH_PRIVATE_KEY is unset" >&2; exit 1; }
+          pacman -Syu --noconfirm --needed git openssh curl
+          useradd -m builder
+          # release.sh reads packaging/PKGBUILD from the checkout and runs git,
+          # so the repository must be writable by the builder user.
+          chown -R builder:builder .
+          install -d -m700 -o builder -g builder /home/builder/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > /home/builder/.ssh/aur
+          chmod 600 /home/builder/.ssh/aur
+          chown builder:builder /home/builder/.ssh/aur
+          # Pin the host key: ssh-keyscan would trust whatever answers on port 22.
+          printf '%s\n' \
+            'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' \
+            > /home/builder/.ssh/known_hosts
+          chown builder:builder /home/builder/.ssh/known_hosts
+          su builder -c "git config --global core.sshCommand 'ssh -i /home/builder/.ssh/aur -o IdentitiesOnly=yes'"
+
+      - name: Push PKGBUILD and .SRCINFO
+        run: |
+          su builder -c "cd '$PWD' && packaging/release.sh '${{ steps.v.outputs.version }}'"
+
+  github-release:
+    name: create GitHub release
+    needs: [build, aur]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pkg
+
+      - name: Resolve version
+        id: v
+        run: |
+          version="${{ inputs.version }}"
+          [ -n "$version" ] || version="${GITHUB_REF_NAME#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "v${{ steps.v.outputs.version }}" \
+            --verify-tag --generate-notes ./*.pkg.tar.zst
